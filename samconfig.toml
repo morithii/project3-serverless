@@ -1,0 +1,14 @@
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "project3-serverless"
+resolve_s3 = true
+s3_prefix = "project3-serverless"
+region = "eu-west-2"
+profile = "project3"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+image_repositories = []
+
+[default.global.parameters]
+region = "eu-west-2"
