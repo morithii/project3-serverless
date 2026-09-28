@@ -2,6 +2,16 @@ AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: Project 3 - Serverless Orders Application
 
+Globals:
+  Function:
+    Runtime: nodejs22.x
+    Architectures:
+      - arm64
+    MemorySize: 256
+    Timeout: 10
+    Tags:
+      Project: project3-serverless
+
 Resources:
   OrdersTable:
     Type: AWS::DynamoDB::Table
@@ -24,8 +34,26 @@ Resources:
         - Key: Project
           Value: project3-serverless
 
+  CreateOrderFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: project3-create-order
+      Description: Saves a new order to the Orders table
+      CodeUri: src/create-order/
+      Handler: index.handler
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref OrdersTable
+      Policies:
+        - DynamoDBWritePolicy:
+            TableName: !Ref OrdersTable
+
 Outputs:
   OrdersTableName:
     Value: !Ref OrdersTable
   OrdersTableArn:
     Value: !GetAtt OrdersTable.Arn
+  CreateOrderFunctionArn:
+    Value: !GetAtt CreateOrderFunction.Arn
+  CreateOrderFunctionRoleArn:
+    Value: !GetAtt CreateOrderFunctionRole.Arn
