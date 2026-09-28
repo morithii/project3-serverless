@@ -11,6 +11,8 @@ Globals:
     Timeout: 10
     Tags:
       Project: project3-serverless
+  Api:
+    OpenApiVersion: '3.0.1'
 
 Resources:
   OrdersTable:
@@ -34,6 +36,15 @@ Resources:
         - Key: Project
           Value: project3-serverless
 
+  # NEW: the REST API
+  OrdersApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: project3-orders-api
+      StageName: prod
+      Tags:
+        Project: project3-serverless
+
   CreateOrderFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -47,6 +58,14 @@ Resources:
       Policies:
         - DynamoDBWritePolicy:
             TableName: !Ref OrdersTable
+      # NEW: POST /orders -> this function
+      Events:
+        CreateOrder:
+          Type: Api
+          Properties:
+            RestApiId: !Ref OrdersApi
+            Path: /orders
+            Method: post
 
 Outputs:
   OrdersTableName:
@@ -57,3 +76,6 @@ Outputs:
     Value: !GetAtt CreateOrderFunction.Arn
   CreateOrderFunctionRoleArn:
     Value: !GetAtt CreateOrderFunctionRole.Arn
+  OrdersApiUrl:
+    Description: POST orders to this URL
+    Value: !Join ["", ["https://", !Ref OrdersApi, ".execute-api.", !Ref "AWS::Region", ".amazonaws.com/prod/orders"]]
