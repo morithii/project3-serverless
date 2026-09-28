@@ -36,14 +36,97 @@ Resources:
         - Key: Project
           Value: project3-serverless
 
-  # NEW: the REST API
+  # NEW: user directory
+  OrdersUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: project3-orders-users
+      UsernameAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 12
+          RequireUppercase: true
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+      UserPoolTags:
+        Project: project3-serverless
+
+  # NEW: the "app" that users sign in through
+  OrdersUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: project3-orders-client
+      UserPoolId: !Ref OrdersUserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      PreventUserExistenceErrors: ENABLED
+      IdTokenValidity: 60
+      AccessTokenValidity: 60
+      TokenValidityUnits:
+        IdToken: minutes
+        AccessToken: minutes
+
   OrdersApi:
     Type: AWS::Serverless::Api
     Properties:
       Name: project3-orders-api
       StageName: prod
+      # NEW: every route requires a valid Cognito token
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn: !GetAtt OrdersUserPool.Arn
       Tags:
         Project: project3-serverless
+
+  # NEW: WAF web ACL with a per-IP rate limit
+  OrdersApiWebAcl:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name: project3-orders-api-acl
+      Scope: REGIONAL
+      DefaultAction:
+        Allow: {}
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName: project3OrdersApiAcl
+      Rules:
+        - Name: RateLimitPerIP
+          Priority: 0
+          Action:
+            Block: {}
+          Statement:
+            RateBasedStatement:
+              Limit: 100
+              EvaluationWindowSec: 300
+              AggregateKeyType: IP
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: project3RateLimitPerIP
+      Tags:
+        - Key: Project
+          Value: project3-serverless
+
+  # NEW: attach the WAF to the API's prod stage
+  OrdersApiWebAclAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    DependsOn: OrdersApiprodStage
+    Properties:
+      ResourceArn: !Join ["", ["arn:aws:apigateway:", !Ref "AWS::Region", "::/restapis/", !Ref OrdersApi, "/stages/prod"]]
+      WebACLArn: !GetAtt OrdersApiWebAcl.Arn
 
   CreateOrderFunction:
     Type: AWS::Serverless::Function
@@ -58,7 +141,6 @@ Resources:
       Policies:
         - DynamoDBWritePolicy:
             TableName: !Ref OrdersTable
-      # NEW: POST /orders -> this function
       Events:
         CreateOrder:
           Type: Api
@@ -79,3 +161,9 @@ Outputs:
   OrdersApiUrl:
     Description: POST orders to this URL
     Value: !Join ["", ["https://", !Ref OrdersApi, ".execute-api.", !Ref "AWS::Region", ".amazonaws.com/prod/orders"]]
+  UserPoolId:
+    Value: !Ref OrdersUserPool
+  UserPoolClientId:
+    Value: !Ref OrdersUserPoolClient
+  WebAclArn:
+    Value: !GetAtt OrdersApiWebAcl.Arn
