@@ -62,5 +62,5 @@ export const handler = async (event) => {
   }
 
   console.log(JSON.stringify({ message: "Order created", orderId, itemCount: items.length }));
-  return response(201, { orderId, itemCount: items.length, createdAt });
+  return response(201, { orderId, status: "CREATED", itemCount: items.length, createdAt });
 };
