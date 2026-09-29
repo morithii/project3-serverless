@@ -18,7 +18,7 @@ Resources:
               StringEquals:
                 "token.actions.githubusercontent.com:aud": sts.amazonaws.com
               StringLike:
-                "token.actions.githubusercontent.com:sub": repo:morithii/project3-serverless:ref:refs/heads/main
+                "token.actions.githubusercontent.com:sub": repo:morithii@77978732/project3-serverless@1385595482:ref:refs/heads/main
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/PowerUserAccess
       Policies:
