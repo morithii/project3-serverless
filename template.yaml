@@ -36,7 +36,6 @@ Resources:
         - Key: Project
           Value: project3-serverless
 
-  # NEW: user directory
   OrdersUserPool:
     Type: AWS::Cognito::UserPool
     Properties:
@@ -59,7 +58,6 @@ Resources:
       UserPoolTags:
         Project: project3-serverless
 
-  # NEW: the "app" that users sign in through
   OrdersUserPoolClient:
     Type: AWS::Cognito::UserPoolClient
     Properties:
@@ -81,7 +79,6 @@ Resources:
     Properties:
       Name: project3-orders-api
       StageName: prod
-      # NEW: every route requires a valid Cognito token
       Auth:
         DefaultAuthorizer: CognitoAuthorizer
         Authorizers:
@@ -90,7 +87,6 @@ Resources:
       Tags:
         Project: project3-serverless
 
-  # NEW: WAF web ACL with a per-IP rate limit
   OrdersApiWebAcl:
     Type: AWS::WAFv2::WebACL
     Properties:
@@ -120,7 +116,6 @@ Resources:
         - Key: Project
           Value: project3-serverless
 
-  # NEW: attach the WAF to the API's prod stage
   OrdersApiWebAclAssociation:
     Type: AWS::WAFv2::WebACLAssociation
     DependsOn: OrdersApiprodStage
@@ -135,6 +130,7 @@ Resources:
       Description: Saves a new order to the Orders table
       CodeUri: src/create-order/
       Handler: index.handler
+      Tracing: Active                      # NEW: X-Ray tracing
       Environment:
         Variables:
           TABLE_NAME: !Ref OrdersTable
@@ -148,6 +144,26 @@ Resources:
             RestApiId: !Ref OrdersApi
             Path: /orders
             Method: post
+
+  # NEW: CloudWatch dashboard
+  OrdersDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: project3-orders-dashboard
+      DashboardBody: !Join
+        - ""
+        - - '{"widgets":['
+          - '{"type":"metric","x":0,"y":0,"width":12,"height":6,"properties":{"title":"API Gateway - Requests and 4XX Errors","region":"'
+          - !Ref "AWS::Region"
+          - '","stat":"Sum","period":60,"view":"timeSeries","metrics":[["AWS/ApiGateway","Count","ApiName","project3-orders-api"],["AWS/ApiGateway","4XXError","ApiName","project3-orders-api"]]}},'
+          - '{"type":"metric","x":12,"y":0,"width":12,"height":6,"properties":{"title":"Lambda - Invocations and Errors","region":"'
+          - !Ref "AWS::Region"
+          - '","stat":"Sum","period":60,"view":"timeSeries","metrics":[["AWS/Lambda","Invocations","FunctionName","'
+          - !Ref CreateOrderFunction
+          - '"],["AWS/Lambda","Errors","FunctionName","'
+          - !Ref CreateOrderFunction
+          - '"]]}}'
+          - ']}'
 
 Outputs:
   OrdersTableName:
@@ -167,3 +183,6 @@ Outputs:
     Value: !Ref OrdersUserPoolClient
   WebAclArn:
     Value: !GetAtt OrdersApiWebAcl.Arn
+  DashboardUrl:
+    Description: Open this to see the dashboard
+    Value: !Join ["", ["https://", !Ref "AWS::Region", ".console.aws.amazon.com/cloudwatch/home?region=", !Ref "AWS::Region", "#dashboards:name=project3-orders-dashboard"]]
