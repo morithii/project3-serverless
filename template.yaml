@@ -154,6 +154,20 @@ Resources:
           title: project3-orders-api
           version: '1.0'
         paths:
+          # POST /orders -> CreateOrderFunction (defined here explicitly: SAM does not
+          # reliably merge function Events into an explicit DefinitionBody)
+          /orders:
+            post:
+              summary: Create an order (Lambda proxy integration)
+              security:
+                - CognitoAuthorizer: []
+              responses:
+                '201':
+                  description: Order created
+              x-amazon-apigateway-integration:
+                type: aws_proxy
+                httpMethod: POST
+                uri: !Join ["", ["arn:aws:apigateway:", !Ref "AWS::Region", ":lambda:path/2015-03-31/functions/", !GetAtt CreateOrderFunction.Arn, "/invocations"]]
           /orders/{orderId}:
             get:
               summary: Get an order directly from DynamoDB (no Lambda)
@@ -259,13 +273,16 @@ Resources:
       Policies:
         - DynamoDBWritePolicy:
             TableName: !Ref OrdersGlobalTable
-      Events:
-        CreateOrder:
-          Type: Api
-          Properties:
-            RestApiId: !Ref OrdersApi
-            Path: /orders
-            Method: post
+
+  # Lets API Gateway invoke the function for POST /orders (SAM used to add this
+  # automatically from the Events block, which the explicit route above replaces)
+  CreateOrderApiPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref CreateOrderFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Join ["", ["arn:aws:execute-api:", !Ref "AWS::Region", ":", !Ref "AWS::AccountId", ":", !Ref OrdersApi, "/*/POST/orders"]]
 
   OrdersDashboard:
     Type: AWS::CloudWatch::Dashboard
