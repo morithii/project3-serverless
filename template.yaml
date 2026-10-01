@@ -15,30 +15,7 @@ Globals:
     OpenApiVersion: '3.0.1'
 
 Resources:
-  # LEGACY single-region table. Kept only until its data is copied into
-  # OrdersGlobalTable, then removed from this template in a follow-up commit.
-  OrdersTable:
-    Type: AWS::DynamoDB::Table
-    Properties:
-      TableName: Orders
-      BillingMode: PAY_PER_REQUEST
-      AttributeDefinitions:
-        - AttributeName: orderId
-          AttributeType: S
-        - AttributeName: itemId
-          AttributeType: S
-      KeySchema:
-        - AttributeName: orderId
-          KeyType: HASH
-        - AttributeName: itemId
-          KeyType: RANGE
-      PointInTimeRecoverySpecification:
-        PointInTimeRecoveryEnabled: true
-      Tags:
-        - Key: Project
-          Value: project3-serverless
-
-  # NEW: Global Table - one table, replicated across two regions.
+  # Global Table - one table, replicated across two regions.
   # Streams carry every change to the other region (required for replication).
   OrdersGlobalTable:
     Type: AWS::DynamoDB::GlobalTable
