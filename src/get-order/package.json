@@ -1,0 +1,9 @@
+{
+  "name": "get-order",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.mjs",
+  "dependencies": {
+    "@amazon-dax-sdk/lib-dax": "^3.1.0"
+  }
+}
