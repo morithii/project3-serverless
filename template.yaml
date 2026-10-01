@@ -74,6 +74,7 @@ Resources:
         IdToken: minutes
         AccessToken: minutes
 
+  # NEW: role API Gateway assumes to read from DynamoDB (Query only, this table only)
   ApiGatewayDynamoDBReadRole:
     Type: AWS::IAM::Role
     Properties:
@@ -101,19 +102,13 @@ Resources:
     Properties:
       Name: project3-orders-api
       StageName: prod
-      # NEW: stage-level cache (smallest size), GET /orders/{orderId} cached for 300 s
-      CacheClusterEnabled: true
-      CacheClusterSize: '0.5'
-      MethodSettings:
-        - ResourcePath: '/~1orders~1{orderId}'
-          HttpMethod: GET
-          CachingEnabled: true
-          CacheTtlInSeconds: 300
       Auth:
         DefaultAuthorizer: CognitoAuthorizer
         Authorizers:
           CognitoAuthorizer:
             UserPoolArn: !GetAtt OrdersUserPool.Arn
+      # NEW: OpenAPI definition holding the direct DynamoDB route.
+      # SAM still adds POST /orders (from the function's Events) into this.
       DefinitionBody:
         openapi: '3.0.1'
         info:
@@ -142,9 +137,6 @@ Resources:
                 uri: !Join ["", ["arn:aws:apigateway:", !Ref "AWS::Region", ":dynamodb:action/Query"]]
                 credentials: !GetAtt ApiGatewayDynamoDBReadRole.Arn
                 passthroughBehavior: never
-                # NEW: cache per orderId, otherwise every order would share one cached reply
-                cacheKeyParameters:
-                  - method.request.path.orderId
                 requestTemplates:
                   application/json: |
                     {
@@ -236,132 +228,6 @@ Resources:
             Path: /orders
             Method: post
 
-  # ---------- NEW: private network for DAX ----------
-  DaxVpc:
-    Type: AWS::EC2::VPC
-    Properties:
-      CidrBlock: 10.30.0.0/16
-      EnableDnsSupport: true
-      EnableDnsHostnames: true
-      Tags:
-        - Key: Name
-          Value: project3-dax-vpc
-
-  DaxSubnetA:
-    Type: AWS::EC2::Subnet
-    Properties:
-      VpcId: !Ref DaxVpc
-      CidrBlock: 10.30.1.0/24
-      AvailabilityZone: !Select [0, !GetAZs ""]
-      Tags:
-        - Key: Name
-          Value: project3-dax-private-a
-
-  DaxSubnetB:
-    Type: AWS::EC2::Subnet
-    Properties:
-      VpcId: !Ref DaxVpc
-      CidrBlock: 10.30.2.0/24
-      AvailabilityZone: !Select [1, !GetAZs ""]
-      Tags:
-        - Key: Name
-          Value: project3-dax-private-b
-
-  GetOrderFunctionSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: project3 get-order Lambda
-      VpcId: !Ref DaxVpc
-
-  DaxSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: project3 DAX cluster - TLS from the get-order Lambda only
-      VpcId: !Ref DaxVpc
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 9111
-          ToPort: 9111
-          SourceSecurityGroupId: !GetAtt GetOrderFunctionSecurityGroup.GroupId
-
-  # ---------- NEW: DAX cluster ----------
-  DaxServiceRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: dax.amazonaws.com
-            Action: sts:AssumeRole
-      Policies:
-        - PolicyName: ReadOrdersTable
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - dynamodb:GetItem
-                  - dynamodb:BatchGetItem
-                  - dynamodb:Query
-                  - dynamodb:Scan
-                  - dynamodb:DescribeTable
-                Resource: !GetAtt OrdersTable.Arn
-
-  DaxSubnetGroup:
-    Type: AWS::DAX::SubnetGroup
-    Properties:
-      SubnetGroupName: project3-orders-dax-subnets
-      Description: Private subnets for the project3 DAX cluster
-      SubnetIds:
-        - !Ref DaxSubnetA
-        - !Ref DaxSubnetB
-
-  OrdersDaxCluster:
-    Type: AWS::DAX::Cluster
-    Properties:
-      ClusterName: project3-orders-dax
-      Description: Read cache for the Orders table
-      NodeType: dax.t3.small
-      ReplicationFactor: 1
-      IAMRoleARN: !GetAtt DaxServiceRole.Arn
-      SubnetGroupName: !Ref DaxSubnetGroup
-      SecurityGroupIds:
-        - !GetAtt DaxSecurityGroup.GroupId
-      SSESpecification:
-        SSEEnabled: true
-      ClusterEndpointEncryptionType: TLS
-
-  # ---------- NEW: Lambda that reads through DAX ----------
-  GetOrderFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName: project3-get-order-dax
-      Description: Reads an order through the DAX cache
-      CodeUri: src/get-order/
-      Handler: index.handler
-      Timeout: 15
-      VpcConfig:
-        SecurityGroupIds:
-          - !GetAtt GetOrderFunctionSecurityGroup.GroupId
-        SubnetIds:
-          - !Ref DaxSubnetA
-          - !Ref DaxSubnetB
-      Environment:
-        Variables:
-          TABLE_NAME: !Ref OrdersTable
-          DAX_ENDPOINT: !GetAtt OrdersDaxCluster.ClusterDiscoveryEndpointURL
-      Policies:
-        - Version: '2012-10-17'
-          Statement:
-            - Effect: Allow
-              Action:
-                - dax:GetItem
-                - dax:BatchGetItem
-                - dax:Query
-              Resource: !GetAtt OrdersDaxCluster.Arn
-
   OrdersDashboard:
     Type: AWS::CloudWatch::Dashboard
     Properties:
@@ -399,8 +265,6 @@ Outputs:
     Value: !Ref OrdersUserPoolClient
   WebAclArn:
     Value: !GetAtt OrdersApiWebAcl.Arn
-  DaxEndpoint:
-    Value: !GetAtt OrdersDaxCluster.ClusterDiscoveryEndpointURL
   DashboardUrl:
     Description: Open this to see the dashboard
     Value: !Join ["", ["https://", !Ref "AWS::Region", ".console.aws.amazon.com/cloudwatch/home?region=", !Ref "AWS::Region", "#dashboards:name=project3-orders-dashboard"]]
