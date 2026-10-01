@@ -74,6 +74,29 @@ Resources:
         IdToken: minutes
         AccessToken: minutes
 
+  # NEW: role API Gateway assumes to read from DynamoDB (Query only, this table only)
+  ApiGatewayDynamoDBReadRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: QueryOrdersTable
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: dynamodb:Query
+                Resource: !GetAtt OrdersTable.Arn
+      Tags:
+        - Key: Project
+          Value: project3-serverless
+
   OrdersApi:
     Type: AWS::Serverless::Api
     Properties:
@@ -84,6 +107,66 @@ Resources:
         Authorizers:
           CognitoAuthorizer:
             UserPoolArn: !GetAtt OrdersUserPool.Arn
+      # NEW: OpenAPI definition holding the direct DynamoDB route.
+      # SAM still adds POST /orders (from the function's Events) into this.
+      DefinitionBody:
+        openapi: '3.0.1'
+        info:
+          title: project3-orders-api
+          version: '1.0'
+        paths:
+          /orders/{orderId}:
+            get:
+              summary: Get an order directly from DynamoDB (no Lambda)
+              parameters:
+                - name: orderId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+              security:
+                - CognitoAuthorizer: []
+              responses:
+                '200':
+                  description: The order
+                '404':
+                  description: Order not found
+              x-amazon-apigateway-integration:
+                type: aws
+                httpMethod: POST
+                uri: !Join ["", ["arn:aws:apigateway:", !Ref "AWS::Region", ":dynamodb:action/Query"]]
+                credentials: !GetAtt ApiGatewayDynamoDBReadRole.Arn
+                passthroughBehavior: never
+                requestTemplates:
+                  application/json: |
+                    {
+                      "TableName": "Orders",
+                      "KeyConditionExpression": "orderId = :o",
+                      "ExpressionAttributeValues": {
+                        ":o": {"S": "$util.escapeJavaScript($input.params('orderId'))"}
+                      }
+                    }
+                responses:
+                  default:
+                    statusCode: '200'
+                    responseTemplates:
+                      application/json: |
+                        #set($inputRoot = $input.path('$'))
+                        #if($inputRoot.Count == 0)
+                        #set($context.responseOverride.status = 404)
+                        {"message": "Order not found"}
+                        #else
+                        {
+                          "orderId": "$inputRoot.Items[0].orderId.S",
+                          "customerId": "$inputRoot.Items[0].customerId.S",
+                          "createdAt": "$inputRoot.Items[0].createdAt.S",
+                          "items": [
+                        #foreach($item in $inputRoot.Items)
+                            {"itemId": "$item.itemId.S", "productId": "$item.productId.S", "quantity": $item.quantity.N, "price": $item.price.N}#if($foreach.hasNext),#end
+                        #end
+                          ]
+                        }
+                        #end
       Tags:
         Project: project3-serverless
 
@@ -130,7 +213,7 @@ Resources:
       Description: Saves a new order to the Orders table
       CodeUri: src/create-order/
       Handler: index.handler
-      Tracing: Active                      # NEW: X-Ray tracing
+      Tracing: Active
       Environment:
         Variables:
           TABLE_NAME: !Ref OrdersTable
@@ -145,7 +228,6 @@ Resources:
             Path: /orders
             Method: post
 
-  # NEW: CloudWatch dashboard
   OrdersDashboard:
     Type: AWS::CloudWatch::Dashboard
     Properties:
