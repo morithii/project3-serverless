@@ -102,6 +102,8 @@ Resources:
     Properties:
       Name: project3-orders-api
       StageName: prod
+      # Explicitly off: removing the property alone leaves an existing cache running
+      CacheClusterEnabled: false
       Auth:
         DefaultAuthorizer: CognitoAuthorizer
         Authorizers:
